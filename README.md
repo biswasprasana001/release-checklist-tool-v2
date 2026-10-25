@@ -1,6 +1,6 @@
 # ReleaseCheck
 
-ReleaseCheck is an all-in-one release checklist tool [a helper web app to track steps when launching software].
+ReleaseCheck is an all-in-one release checklist tool.
 
 It allows software development teams to track each release, compute completion states automatically from 7 checklist steps, and view/edit/delete releases.
 
@@ -223,17 +223,11 @@ mutation DeleteRelease {
 
 ---
 
-## Free & Unlimited Deployment Guide
+## Documentation & Performance Benchmarks
 
-When deploying online, prioritize free and unlimited solutions:
+In-depth technical architecture, deployment instructions, and stress test analyses are located in the [`docs/`](docs/) directory:
 
-1. **Database**:
-   - **Neon** (neon.tech) or **Supabase** (supabase.com): Free serverless PostgreSQL database with 0.5 GB storage and unlimited queries within tier limits.
-   - Grab the connection string: `postgresql://user:password@ep-xyz.neon.tech/neondb?sslmode=require`.
+- **[Production Deployment Guide](docs/deployment.md)**: Full setup instructions for hosting on Vercel with Neon serverless PostgreSQL.
+- **[Read Stress Test Analysis](docs/benchmarks/read-benchmark.md)**: Read performance evaluation, single-flight query deduplication, and cache stampede resolution up to 10,000 concurrent users.
+- **[Write Stress Test Analysis](docs/benchmarks/write-benchmark.md)**: Write capacity evaluation, PostgreSQL connection pool optimization, and durability benchmarks under surge loads.
 
-2. **Backend**:
-   - **Render** (render.com): Free web service tier. Connect repository, set build command `npm install --prefix backend` and start command `node backend/server.js`, and add environment variable `DATABASE_URL`.
-   - Alternatively, deploy via Docker container on Render / Railway.
-
-3. **Frontend**:
-   - **Vercel** or **Netlify** or **Cloudflare Pages**: Free unlimited static hosting. Connect frontend directory with build command `npm run build` and output directory `dist`.

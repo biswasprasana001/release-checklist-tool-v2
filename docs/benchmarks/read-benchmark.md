@@ -1,13 +1,13 @@
-# Release Checklist Tool — Stress Test Analysis
+# Release Checklist Tool — Read Stress Test Analysis
 
-This report documents the performance evaluation, bottleneck diagnosis, and architectural optimization of the Release Checklist backend [the server code managing database queries and business logic].
+In this analysis, I evaluated the read performance of the Release Checklist backend, diagnosed connection bottlenecks and cache stampedes, and implemented architectural optimizations to achieve sub-second latency under high concurrency.
 
 ---
 
 ## 1. System Baseline & Bottleneck Diagnosis
 
 ### Initial Architecture
-The initial server implementation used direct database queries without caching [temporary fast storage]:
+My initial server implementation used direct database queries without caching:
 
 ```javascript
 // Database connection pool (pg.Pool)
@@ -28,13 +28,13 @@ export const resolvers = {
 };
 ```
 
-* **No Caching**: Every GraphQL [a query language for asking the server for specific data] read triggered a SQL query to PostgreSQL [the database program that saves records to disk].
-* **Connection Bottleneck**: The connection pool [a shared group of pre-opened communication channels] defaulted to **10 connections**, allowing only 10 concurrent database queries at any millisecond.
+* **No Caching**: Every GraphQL read triggered a SQL query to PostgreSQL.
+* **Connection Bottleneck**: The connection pool defaulted to **10 connections**, allowing only 10 concurrent database queries at any millisecond.
 
 ### Baseline Findings
-Stress tests [tests sending heavy simulated traffic to evaluate stability] across 9 concurrency tiers [levels of simultaneous visitors] revealed the initial capacity ceiling:
+My baseline stress tests across 9 concurrency tiers revealed where the server hit its physical capacity ceiling:
 
-| Users [Simultaneous People] | Throughput [Requests Completed / Sec] | Avg Wait [ms] | p95 Wait [Worst 5% Lag] | Errors [Dropped Requests] | Status |
+| Concurrent Users | Throughput | Avg Latency | p95 Latency | Errors | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **10** | 1,669 req/s | 6 ms | 11 ms | 0 (0.0%) | Healthy |
 | **50** | 2,213 req/s | 23 ms | 27 ms | 0 (0.0%) | Healthy |
@@ -47,23 +47,23 @@ Stress tests [tests sending heavy simulated traffic to evaluate stability] acros
 | **10,000** | 25 req/s | 15,220 ms | 16,651 ms | 19,271 (98.2%) | Collapsed |
 
 ### Root Cause
-At 500 users, 10 slots served requests while the remaining **490 requests waited in line**, driving p95 latency [wait time] to 780 ms. At 1,000 users, queue delays exceeded the 4-second client timeout [giving up and canceling after waiting too long], causing **297 dropped requests (3.3% errors)**.
+At 500 users, 10 slots served requests while the remaining **490 requests waited in line**, driving p95 latency to 780 ms. At 1,000 users, queue delays exceeded the 4-second client timeout, causing **297 dropped requests (3.3% errors)**.
 
 ---
 
-## 2. Reliability & Scaling Objectives
+## 2. My Scaling & Reliability Objectives
 
-To support production-grade workloads, the backend required:
+To support production-grade workloads, I established three core engineering targets:
 1. **Concurrency Support**: Maintain zero dropped requests up to 1,000 concurrent users.
 2. **Sub-Second Latency**: Keep p95 response times under 250 ms across normal operational loads.
-3. **Data Integrity**: Guarantee immediate cache invalidation [clearing stored memory when data changes] so updates reflect instantly.
+3. **Data Integrity**: Guarantee immediate cache invalidation so updates reflect instantly.
 
 ---
 
 ## 3. Engineering Iterations & Stampede Resolution
 
 ### Iteration 1: Pool Expansion & In-Memory Cache
-Connections were expanded from 10 to 30, and a 2-second in-memory RAM cache was added with automatic invalidation on data changes:
+What I did: I expanded connections from 10 to 30, and added a 2-second in-memory RAM cache with automatic invalidation on data changes:
 
 ```javascript
 export const pool = new pg.Pool({
@@ -84,13 +84,13 @@ export function invalidateCache() {
 ```
 
 * **Gains**: Peak throughput jumped from ~2,200 req/s to **3,476 req/s** (+55% to +75%), and 500-user p95 latency dropped 4x (from 780 ms to 199 ms).
-* **The New Failure (Cache Stampede)**: At 1,000 users, benchmark tests (Terminal 27388) uncovered **1,702 errors (11.3%)**.
-* **Diagnosis**: When the 2-second cache expired, hundreds of concurrent requests rushed PostgreSQL at the identical millisecond (a **cache stampede** [when temporary memory expires and hundreds of requests flood the database at once]). The 30 pool slots immediately saturated, creating a massive queue backlog that timed out.
+* **The Failure I Encountered (Cache Stampede)**: At 1,000 users, benchmark tests uncovered **1,702 errors (11.3%)**.
+* **My Diagnosis**: When the 2-second cache expired, hundreds of concurrent requests rushed PostgreSQL at the identical millisecond (a cache stampede). The 30 pool slots immediately saturated, creating a massive queue backlog that timed out.
 
 ### Iteration 2: Single-Flight Deduplication & Stale-While-Revalidate
-To eliminate the stampede, four architectural improvements were applied:
+How I resolved the stampede: To eliminate the stampede, I designed and applied four architectural improvements:
 
-1. **Single-Flight Deduplication (`inflightReleasesPromise`)**: Only **one** database query runs when the cache expires. All concurrent requests hook into that single promise [a pending task that shares its result when finished].
+1. **Single-Flight Deduplication (`inflightReleasesPromise`)**: Only **one** database query runs when the cache expires. All concurrent requests hook into that single pending promise.
 2. **Stale-While-Revalidate**: Cached data returns immediately (**0 ms wait**). A background worker quietly refreshes PostgreSQL data without delaying user requests.
 3. **Pool Expansion (50 Connections)**: Increased pool limit to prevent background refreshes from competing with database writes.
 4. **HTTP Keep-Alive Tuning**: Set `keepAliveTimeout = 65000` to reuse network connections rather than renegotiating handshakes.
@@ -161,7 +161,7 @@ server.headersTimeout = 66000;
 ### Verified Test Results
 Re-running benchmarks verified the complete resolution of the cache stampede:
 
-| Users | Throughput | Total Completed | Avg Wait | p95 Wait | Errors | Status |
+| Concurrent Users | Throughput | Total Completed | Avg Latency | p95 Latency | Errors | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **10** | 2,055 req/s | 10,293 | 5 ms | 11 ms | 0 (0.0%) | Healthy |
 | **50** | 2,485 req/s | 12,477 | 20 ms | 30 ms | 0 (0.0%) | Healthy |
@@ -198,13 +198,14 @@ Re-running benchmarks verified the complete resolution of the cache stampede:
 ### System Limits & Scaling Roadmap
 
 #### Physical Constraints
-* **2,500 Users (CPU Event Loop Saturation)**: Node.js executes on a single CPU thread [a single worker processor line]. At 2,500 concurrent connections, CPU utilization reaches 100% on JSON parsing and serialization [converting objects into text strings], causing latency spikes.
-* **5,000–10,000 Users (TCP Socket Exhaustion)**: Operating system socket exhaustion [running out of network communication pipes]. The OS connection backlog queue overflows and rejects incoming connections.
+* **2,500 Users (CPU Event Loop Saturation)**: Node.js executes on a single CPU thread. At 2,500 concurrent connections, CPU utilization reaches 100% on JSON parsing and serialization, causing latency spikes.
+* **5,000–10,000 Users (TCP Socket Exhaustion)**: Operating system socket exhaustion. The OS connection backlog queue overflows and rejects incoming connections.
 
-#### Next-Phase Architecture (Scaling to 10,000+ Users)
-1. **Node.js Cluster Mode**: Run worker processes across all available CPU cores using PM2 [a production process manager] or Node.js cluster module, scaling throughput to 15,000+ req/s.
-2. **Distributed Redis Cache**: Store cached queries in Redis [a fast, shared in-memory database] so multiple server instances share cached state without cache drift.
+#### Next-Phase Architecture (Path to 10,000+ Users)
+If I need to scale this backend beyond 2,500 concurrent users to 10,000+, my planned architectural roadmap consists of:
+1. **Node.js Cluster Mode**: Scaling worker processes across all CPU cores using PM2 or the Node.js cluster module to bypass the single-thread event loop limit (projected 15,000+ req/s).
+2. **Distributed Redis Cache**: Storing cached queries in a shared Redis instance so multiple server processes share cached state without cache drift.
 3. **OS Socket & TCP Tuning**:
-   * Raise `SOMAXCONN` [maximum pending connection queue length] to `65535`.
-   * Increase `ulimit -n` [open file and socket limit] to `65535`.
+   * Raise `SOMAXCONN` to `65535`.
+   * Increase `ulimit -n` to `65535`.
    * Enable `tcp_tw_reuse = 1` to instantly recycle closed TCP sockets.
