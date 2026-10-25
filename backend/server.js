@@ -108,6 +108,7 @@ export const typeDefs = `#graphql
     createRelease(name: String!, date: String!, additionalInfo: String, completedSteps: [Int!]): Release!
     updateRelease(id: ID!, name: String, date: String, additionalInfo: String, completedSteps: [Int!]): Release!
     deleteRelease(id: ID!): Boolean!
+    deleteStressTestData: Int!
   }
 `;
 
@@ -210,6 +211,16 @@ export const resolvers = {
       }
       const res = await pool.query('DELETE FROM releases WHERE id = $1', [id]);
       return (res.rowCount ?? 0) > 0;
+    },
+    deleteStressTestData: async () => {
+      invalidateCache();
+      if (!isDbConnected) {
+        const before = memoryReleases.length;
+        memoryReleases = memoryReleases.filter(r => !r.name?.startsWith('[STRESS_TEST]'));
+        return before - memoryReleases.length;
+      }
+      const res = await pool.query("DELETE FROM releases WHERE name LIKE '[STRESS_TEST]%'");
+      return res.rowCount ?? 0;
     }
   }
 };

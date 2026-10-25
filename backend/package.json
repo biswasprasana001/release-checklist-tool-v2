@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node test.js",
-    "test:stress": "node stress-test.js"
+    "test:stress": "node stress-test.js",
+    "test:stress:write": "node stress-test-write.js"
   },
   "dependencies": {
     "@apollo/server": "^4.11.0",

@@ -41,6 +41,11 @@ test('GraphQL Resolvers - CRUD flow', async () => {
   const deleted = await resolvers.Mutation.deleteRelease(null, { id: created.id });
   assert.equal(deleted, true);
 
+  // 5b. Stress test cleanup mutation
+  await resolvers.Mutation.createRelease(null, { name: '[STRESS_TEST] dummy', date: '2026-10-22' });
+  const cleanedCount = await resolvers.Mutation.deleteStressTestData();
+  assert(cleanedCount >= 1, 'deleteStressTestData must remove records starting with [STRESS_TEST]');
+
   // 6. Cache verification
   const list1 = await resolvers.Query.releases();
   const list2 = await resolvers.Query.releases();
