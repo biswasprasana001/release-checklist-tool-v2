@@ -48,11 +48,12 @@ When hardening the write path against traffic bursts and automated syncs, I targ
 
 ### Request Lifecycle
 Every write request follows this pipeline:
-```
-[Client / Test Runner] ──> [Apollo Server] ──────> [GraphQL Resolver] ──────> [PostgreSQL Pool] ──> [Disk & WAL]
-makePayload()              expressMiddleware()     createRelease()            max: 50 connections    INSERT statement
-HTTP keep-alive            JSON parsing            invalidateCache()          pool.query()           WAL commit
-```
+1. **Client / Test Runner**: `makePayload()` with HTTP keep-alive.
+2. **Apollo Server**: `expressMiddleware()` with JSON parsing.
+3. **GraphQL Resolver**: `createRelease()` and `invalidateCache()`.
+4. **PostgreSQL Pool**: `pool.query()` managed via `max: 50` connections.
+5. **Disk & WAL**: `INSERT` statement and permanent WAL commit.
+
 
 At the end of testing, I executed a cleanup mutation to purge benchmark records:
 ```sql
