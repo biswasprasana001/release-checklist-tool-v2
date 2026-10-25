@@ -1,0 +1,9 @@
+{
+  "outputDirectory": "backend/public",
+  "rewrites": [
+    {
+      "source": "/graphql",
+      "destination": "/api/graphql"
+    }
+  ]
+}

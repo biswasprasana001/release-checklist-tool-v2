@@ -28,8 +28,8 @@ let memoryReleases = [
 
 export const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/releasecheck',
-  connectionTimeoutMillis: 3000,
-  max: 50,
+  connectionTimeoutMillis: 10000,
+  max: 10,
   idleTimeoutMillis: 10000
 });
 
@@ -247,7 +247,7 @@ export async function createApp() {
   return app;
 }
 
-if (process.env.NODE_ENV !== 'test' && !process.argv[1]?.endsWith('test.js')) {
+if (process.env.NODE_ENV !== 'test' && !process.argv[1]?.endsWith('test.js') && !process.env.VERCEL) {
   await initDb();
   const app = await createApp();
   const server = app.listen(PORT, () => console.log(`Server ready at http://localhost:${PORT}/graphql`));
