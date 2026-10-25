@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeStatus, resolvers, pool } from './server.js';
+import { computeStatus, resolvers, pool, invalidateCache } from './server.js';
 
 test('Status computation rules', () => {
   assert.equal(computeStatus([]), 'Planned');
@@ -40,6 +40,21 @@ test('GraphQL Resolvers - CRUD flow', async () => {
   // 5. Delete
   const deleted = await resolvers.Mutation.deleteRelease(null, { id: created.id });
   assert.equal(deleted, true);
+
+  // 6. Cache verification
+  const list1 = await resolvers.Query.releases();
+  const list2 = await resolvers.Query.releases();
+  assert.equal(list1, list2); // in-memory cache returns same reference
+
+  // 7. Single-flight deduplication under concurrency
+  invalidateCache();
+  const concurrentCalls = await Promise.all([
+    resolvers.Query.releases(),
+    resolvers.Query.releases(),
+    resolvers.Query.releases()
+  ]);
+  assert.equal(concurrentCalls[0], concurrentCalls[1]);
+  assert.equal(concurrentCalls[1], concurrentCalls[2]);
 
   await pool.end();
 });

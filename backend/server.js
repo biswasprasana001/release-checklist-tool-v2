@@ -28,8 +28,22 @@ let memoryReleases = [
 
 export const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/releasecheck',
-  connectionTimeoutMillis: 3000
+  connectionTimeoutMillis: 3000,
+  max: 50,
+  idleTimeoutMillis: 10000
 });
+
+// shortcut: in-memory process cache with single-flight deduplication (2s TTL), upgrade: redis if running multiple distributed backend instances
+let cachedReleases = null;
+let cacheExpiresAt = 0;
+let inflightReleasesPromise = null;
+const CACHE_TTL_MS = 2000;
+
+export function invalidateCache() {
+  cachedReleases = null;
+  cacheExpiresAt = 0;
+  inflightReleasesPromise = null;
+}
 
 let isDbConnected = false;
 
@@ -100,9 +114,44 @@ export const typeDefs = `#graphql
 export const resolvers = {
   Query: {
     releases: async () => {
-      if (!isDbConnected) return memoryReleases.map(r => ({ ...r, status: computeStatus(r.completedSteps) }));
-      const res = await pool.query('SELECT * FROM releases ORDER BY id ASC');
-      return res.rows.map(formatRow);
+      const now = Date.now();
+      if (cachedReleases) {
+        if (now >= cacheExpiresAt && !inflightReleasesPromise) {
+          cacheExpiresAt = now + CACHE_TTL_MS;
+          inflightReleasesPromise = (async () => {
+            try {
+              if (isDbConnected) {
+                const res = await pool.query('SELECT * FROM releases ORDER BY id ASC');
+                cachedReleases = res.rows.map(formatRow);
+              }
+            } catch {
+              // keep existing cache on error
+            } finally {
+              inflightReleasesPromise = null;
+            }
+          })();
+        }
+        return cachedReleases;
+      }
+
+      if (inflightReleasesPromise) {
+        return inflightReleasesPromise;
+      }
+      inflightReleasesPromise = (async () => {
+        try {
+          if (!isDbConnected) {
+            cachedReleases = memoryReleases.map(r => ({ ...r, status: computeStatus(r.completedSteps) }));
+          } else {
+            const res = await pool.query('SELECT * FROM releases ORDER BY id ASC');
+            cachedReleases = res.rows.map(formatRow);
+          }
+          cacheExpiresAt = Date.now() + CACHE_TTL_MS;
+          return cachedReleases;
+        } finally {
+          inflightReleasesPromise = null;
+        }
+      })();
+      return inflightReleasesPromise;
     },
     release: async (_, { id }) => {
       if (!isDbConnected) {
@@ -115,6 +164,7 @@ export const resolvers = {
   },
   Mutation: {
     createRelease: async (_, { name, date, additionalInfo = '', completedSteps = [] }) => {
+      invalidateCache();
       if (!isDbConnected) {
         const newItem = { id: String(Date.now()), name, date, additionalInfo, completedSteps };
         memoryReleases.push(newItem);
@@ -127,6 +177,7 @@ export const resolvers = {
       return formatRow(res.rows[0]);
     },
     updateRelease: async (_, { id, name, date, additionalInfo, completedSteps }) => {
+      invalidateCache();
       if (!isDbConnected) {
         const item = memoryReleases.find(r => r.id === id);
         if (!item) throw new Error('Release not found');
@@ -151,6 +202,7 @@ export const resolvers = {
       return formatRow(res.rows[0]);
     },
     deleteRelease: async (_, { id }) => {
+      invalidateCache();
       if (!isDbConnected) {
         const len = memoryReleases.length;
         memoryReleases = memoryReleases.filter(r => r.id !== id);
@@ -187,5 +239,7 @@ export async function createApp() {
 if (process.env.NODE_ENV !== 'test' && !process.argv[1]?.endsWith('test.js')) {
   await initDb();
   const app = await createApp();
-  app.listen(PORT, () => console.log(`Server ready at http://localhost:${PORT}/graphql`));
+  const server = app.listen(PORT, () => console.log(`Server ready at http://localhost:${PORT}/graphql`));
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
 }
